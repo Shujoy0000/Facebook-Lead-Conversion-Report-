@@ -30,37 +30,45 @@ st.markdown('''<style>
 div[data-testid="stMetric"]{border:1px solid #ebedf0;border-top:4px solid #ff6600;padding:12px 14px;border-radius:10px;background:#fff}
 </style>''',unsafe_allow_html=True)
 
-SHEET_ID = '1M7WjEuO82suxvkOTTEwGuOWcPFzYej2c_iRvAA9RipM'
-SHEET_GID = '1218239306'
-FACEBOOK_SHEET = 'Facebook'
+# Exactly the two publicly published Google Sheets CSV links supplied by the user.
+FACEBOOK_CSV_URL = (
+    'https://docs.google.com/spreadsheets/d/e/'
+    '2PACX-1vRhGpSv6YJ5uwMeTI3r06mc4ZmqcCZlrTCQGsjDlDq2o1Y7uYhT3snVgI1jZ_zMUzxN_RZfOKcC-Rfm/pub?output=csv'
+)
+ORDER_CSV_URL = (
+    'https://docs.google.com/spreadsheets/d/e/'
+    '2PACX-1vTDhr-rwKe88LKKludd74G766j1l4vbvoaHi1YwwkefcfjCCgDGkZL6Ty9ngNv3gVvd5ezElgXghOs3/'
+    'pub?gid=81417&single=true&output=csv'
+)
 
-@st.cache_data(ttl=300, show_spinner='Reading Facebook Google Sheet…')
+
+def load_published_csv(url, expected_cols, label):
+    '''Load Google published CSV without credentials and verify the correct sheet.'''
+    try:
+        df = pd.read_csv(url, dtype=str, low_memory=False, encoding='utf-8-sig')
+    except Exception as exc:
+        raise RuntimeError(f'{label}: published CSV পড়া যায়নি ({exc}). Google Sheets → File → Share → Publish to web-এ সঠিক tab CSV হিসেবে published আছে কি না দেখুন.') from exc
+    df.columns = df.columns.astype(str).str.strip().str.replace('\ufeff','',regex=False)
+    missing = set(expected_cols) - set(df.columns)
+    if missing:
+        raise ValueError(
+            f'{label}: ভুল tab/CSV অথবা column missing: {", ".join(sorted(missing))}. '
+            f'প্রথম columns: {list(df.columns[:8])}'
+        )
+    return df.dropna(how='all').reset_index(drop=True)
+
+
+@st.cache_data(ttl=300, show_spinner='Google Sheet থেকে Facebook lead data আসছে…')
 def fetch_google_sheet():
-    """Try private service-account access first, then publicly accessible CSV export."""
-    try:
-        if 'gcp_service_account' in st.secrets:
-            import gspread
-            creds = dict(st.secrets['gcp_service_account'])
-            client = gspread.service_account_from_dict(creds)
-            values = client.open_by_key(SHEET_ID).worksheet(FACEBOOK_SHEET).get_all_values()
-            if not values:
-                return pd.DataFrame(), 'Google API: tab is empty'
-            header=[str(x).strip() for x in values[0]]
-            width=len(header)
-            rows=[(row[:width] + ['']*max(0,width-len(row))) for row in values[1:]]
-            return pd.DataFrame(rows,columns=header),'Google Sheets API (live)'
-    except Exception as exc:
-        service_error=f'Service account could not read sheet: {str(exc)[:200]}'
-    else:
-        service_error='No service account configured.'
-    export_url=f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={SHEET_GID}'
-    try:
-        d=pd.read_csv(export_url,dtype=str,low_memory=False)
-        if 'Contact Number' not in d.columns:
-            raise ValueError('CSV did not contain the Facebook header (the file may be private).')
-        return d,'Google Sheets public CSV (live)'
-    except Exception as exc:
-        raise RuntimeError(service_error+' Public CSV unavailable: '+str(exc)[:180])
+    expected = {'Date', 'Contact Number', 'Campaign Name', 'Short Code-'}
+    return load_published_csv(FACEBOOK_CSV_URL, expected, 'Facebook leads'), 'Published CSV · Facebook (auto-refresh)'
+
+
+@st.cache_data(ttl=300, show_spinner='Google Sheet থেকে Tele Sales orders আসছে…')
+def fetch_order_csv():
+    expected = {'Order Date', 'Contact Number', 'Product Price', 'Campaign'}
+    return load_published_csv(ORDER_CSV_URL, expected, 'Tele Sales Orders')
+
 
 @st.cache_data(ttl=900,show_spinner='Reading uploaded Facebook data…')
 def read_facebook_bytes(data,filename):
@@ -81,24 +89,6 @@ def read_orders_bytes(data):
     return pd.read_excel(io.BytesIO(data),sheet_name='Tele Sales',
                          dtype={'Contact Number':str},engine='openpyxl',
                          usecols=lambda name: str(name).strip() in required)
-
-@st.cache_data(ttl=300,show_spinner='Reading private Tele Sales Order from Google Drive…')
-def fetch_private_order_file(file_id):
-    # The same service account requires Viewer permission on this specific XLSX file.
-    from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaIoBaseDownload
-    creds=service_account.Credentials.from_service_account_info(
-        dict(st.secrets['gcp_service_account']),scopes=['https://www.googleapis.com/auth/drive.readonly'])
-    drive=build('drive','v3',credentials=creds,cache_discovery=False)
-    request=drive.files().get_media(fileId=file_id)
-    buffer=io.BytesIO()
-    downloader=MediaIoBaseDownload(buffer,request)
-    done=False
-    while not done:
-        _,done=downloader.next_chunk()
-    return buffer.getvalue()
-
 
 def money(x):return f'৳{float(x):,.0f}'
 def pct(x):return f'{float(x):.1f}%'
@@ -163,48 +153,53 @@ st.markdown(f'''<div class="bb-legacy-header">
     <div class="bb-legacy-vision-text">অন্যরকম বাংলাদেশের স্বপ্ন নিয়ে</div>
 </div>''', unsafe_allow_html=True)
 
+
+# Automatic Google published CSV reads are primary, as in the old Tele Sales app.
+# Manual uploads are optional fallback; neither service account nor Secrets is needed.
 with st.sidebar:
-    st.header('📊 Data connections')
-    fb_file=st.file_uploader('Facebook data upload (optional CSV / Excel)',type=['csv','xlsx'],key='fb_upload',help='Uploading overrides live Google Sheet. XLSX must have the Facebook tab.')
-    order_file=st.file_uploader('Tele Sales Order.xlsx',type=['xlsx'],key='order_upload',help='Load locally or upload your order workbook. Do not publish customer data in a public GitHub repo.')
-    if st.button('🔄 Refresh data',use_container_width=True):
-        st.cache_data.clear();st.rerun()
+    st.header('🔗 Live Google Sheet')
+    st.caption('Facebook leads ও Tele Sales orders: Published CSV থেকে অটো-লোড (cache 5 মিনিট)।')
+    if st.button('🔄 Refresh Google data', use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+    with st.expander('Optional backup upload (only if CSV access fails)', expanded=False):
+        fb_file = st.file_uploader('Facebook CSV / Excel',type=['csv','xlsx'],key='fb_upload')
+        order_file = st.file_uploader('Tele Sales Orders CSV / Excel',type=['csv','xlsx'],key='order_upload')
 
 try:
     if fb_file is not None:
-        raw_fb=read_facebook_bytes(fb_file.getvalue(),fb_file.name)
-        source_name='Uploaded Facebook file'
+        raw_fb = read_facebook_bytes(fb_file.getvalue(), fb_file.name)
+        source_name = 'Facebook backup upload'
     else:
-        try:
-            raw_fb,source_name=fetch_google_sheet()
-        except Exception as exc:
-            st.error('Could not load Facebook Google Sheet: '+str(exc))
-            st.info('To continue: upload the Facebook tab as CSV/XLSX in the sidebar, or configure `gcp_service_account` in Streamlit Secrets and share the Google Sheet with the service-account email.')
-            st.stop()
-    st.sidebar.success(f'Facebook: {source_name}')
+        raw_fb, source_name = fetch_google_sheet()
+    if raw_fb.empty:
+        st.error('Facebook Published CSV-তে কোনো lead পাওয়া যায়নি।')
+        st.stop()
+    st.sidebar.success('Facebook: ' + source_name)
 except Exception as exc:
-    st.error('Facebook load failed: '+str(exc));st.stop()
+    st.error('Facebook Google Sheet সংযোগ হয়নি: ' + str(exc))
+    st.info('প্রথম CSV URL-এ Facebook tab-এর Date, Contact Number, Campaign Name এবং Short Code- field থাকা জরুরি।')
+    st.stop()
 
 try:
     if order_file is not None:
-        raw_orders=read_orders_bytes(order_file.getvalue());order_source='Uploaded Tele Sales Order.xlsx'
-    elif 'order_drive_file_id' in st.secrets and 'gcp_service_account' in st.secrets:
-        try:
-            remote_data=fetch_private_order_file(str(st.secrets['order_drive_file_id']))
-            raw_orders=read_orders_bytes(remote_data);order_source='Google Drive private XLSX (live)'
-        except Exception as err:
-            st.warning('Private Drive order auto-read unavailable: '+str(err)[:220])
-            raw_orders=pd.DataFrame();order_source='Upload the order workbook in the sidebar.'
-    elif Path('Tele Sales Order.xlsx').is_file():
-        raw_orders=read_orders_bytes(Path('Tele Sales Order.xlsx').read_bytes());order_source='Local order workbook'
+        if order_file.name.lower().endswith('.csv'):
+            raw_orders = pd.read_csv(io.BytesIO(order_file.getvalue()), dtype=str, low_memory=False)
+        else:
+            raw_orders = read_orders_bytes(order_file.getvalue())
+        order_source = 'Orders backup upload'
     else:
-        raw_orders=pd.DataFrame();order_source='Missing: upload workbook to enable order reports'
+        raw_orders = fetch_order_csv()
+        order_source = 'Published CSV · Tele Sales Orders (auto-refresh)'
     if raw_orders.empty:
-        st.sidebar.warning(order_source)
-        st.warning('Order workbook is not loaded. Call and lead reports work, but revenue/conversion will show zero until you upload **Tele Sales Order.xlsx**.')
-    else:st.sidebar.success(f'Orders: {order_source}')
+        st.error('Tele Sales Order Published CSV-তে কোনো অর্ডার নেই।')
+        st.stop()
+    raw_orders.columns = raw_orders.columns.astype(str).str.strip()
+    st.sidebar.success('Orders: ' + order_source)
 except Exception as exc:
-    st.error('Order workbook could not load: '+str(exc));st.stop()
+    st.error('Tele Sales Order Google Sheet সংযোগ হয়নি: ' + str(exc))
+    st.info('দ্বিতীয় CSV URL-এ Order Date, Contact Number, Product Price এবং Campaign field থাকা জরুরি।')
+    st.stop()
 
 with st.sidebar:
     st.header('⚙ Analysis settings')
@@ -371,7 +366,7 @@ with t2:
 
 with t3:
     st.markdown('<div class="section">Facebook Campaign → Converted Customers → Orders → Amount</div>',unsafe_allow_html=True)
-    st.markdown('<div class="note">**Lead Campaign** comes from Facebook → Campaign Name; **order revenue** comes from Tele Sales Order.xlsx → Product Price. Only orders matched to an answered call are counted as conversions. Conversion Rate = unique buying phone numbers ÷ unique reached phone numbers × 100. Repeat calls and repeat orders do not inflate buyer counts.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="note">**Lead Campaign** comes from Facebook → Campaign Name; **order revenue** comes from Tele Sales Order CSV → Product Price. Only orders matched to an answered call are counted as conversions. Conversion Rate = unique buying phone numbers ÷ unique reached phone numbers × 100. Repeat calls and repeat orders do not inflate buyer counts.</div>',unsafe_allow_html=True)
     mode=st.radio('Campaign conversion by', ['Data Provided Date','Call Date'],horizontal=True,key='conv_campaign_mode')
     kind='provided' if mode.startswith('Data') else 'call'
     cohort=provided if kind=='provided' else call_dates
@@ -414,9 +409,9 @@ with t3:
     report_table(source_detail,'facebook_to_order_campaign_attribution.csv')
     if not orders.empty:
         name_filled=orders['campaign_name'].astype(str).str.strip().ne('').sum()
-        st.caption(f'Order workbook Campaign Name populated in {int(name_filled):,} of {len(orders):,} eligible orders (within order-source filter); the matching Facebook campaign name is used for lead conversion attribution instead.')
+        st.caption(f'Order CSV Campaign Name populated in {int(name_filled):,} of {len(orders):,} eligible orders (within order-source filter); the matching Facebook campaign name is used for lead conversion attribution instead.')
     else:
-        st.warning('Upload Tele Sales Order.xlsx in the sidebar. Without that file, revenue and conversion cannot be calculated.')
+        st.warning('Order Published CSV থেকে ডেটা আসেনি। Sidebar-এর Refresh Google data ব্যবহার করুন।')
 
 with t4:
     st.markdown('<div class="section">Order & Campaign Performance</div>',unsafe_allow_html=True)
@@ -452,7 +447,7 @@ with t4:
             x=x.rename(columns={dimension:'Campaign'})
             report_table(x,'daily_campaign_order_value.csv')
     if raw_orders.empty:
-        st.info('Upload the order workbook in the sidebar to populate these reports.')
+        st.info('Order Published CSV থেকে ডেটা পাওয়া যায়নি।')
 
 with t5:
     st.markdown('<div class="section">Data Quality & Attribution Rules</div>',unsafe_allow_html=True)
@@ -482,4 +477,3 @@ with t5:
     st.subheader('Source data checklist')
     with st.expander('Show column labels (no customer rows)',expanded=False):
         st.write({'Facebook fields':list(raw_fb.columns), 'Order fields':list(raw_orders.columns) if not raw_orders.empty else []})
-
