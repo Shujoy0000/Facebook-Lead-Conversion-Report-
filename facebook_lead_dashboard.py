@@ -35,7 +35,7 @@ div[data-testid="stMetricValue"]{text-align:center;font-weight:800;color:#252525
 # Exactly the two publicly published Google Sheets CSV links supplied by the user.
 FACEBOOK_CSV_URL = (
     'https://docs.google.com/spreadsheets/d/e/'
-    '2PACX-1vRhGpSv6YJ5uwMeTI3r06mc4ZmqcCZlrTCQGsjDlDq2o1Y7uYhT3snVgI1jZ_zMUzxN_RZfOKcC-Rfm/pub?output=csv'
+    '2PACX-1vRhGpSv6YJ5uwMeTI3r06mc4ZmqcCZlrTCQGsjDlDq2o1Y7uYhT3snVgI1jZ_zMUzxN_RZfOKcC-Rfm/pub?gid=1218239306&single=true&output=csv'
 )
 ORDER_CSV_URL = (
     'https://docs.google.com/spreadsheets/d/e/'
@@ -161,22 +161,26 @@ header_html = (
 st.markdown(header_html, unsafe_allow_html=True)
 
 
-# Keep the date filter at the very top of the sidebar, like the original
-# Tele Sales Analytics Dashboard. Content for this container is added after
-# date processing; Streamlit retains its position above the live-source panel.
+# Only dates and two optional filters appear in the sidebar.
+# Source settings stay in a collapsed main-page panel.
 date_filter_sidebar = st.sidebar.container()
-
-# Automatic Google published CSV reads are primary, as in the old Tele Sales app.
-# Manual uploads are optional fallback; neither service account nor Secrets is needed.
-with st.sidebar:
-    st.header('🔗 Live Google Sheet')
-    st.caption('Facebook leads ও Tele Sales orders: Published CSV থেকে অটো-লোড (cache 5 মিনিট)।')
-    if st.button('🔄 Refresh Google data', use_container_width=True):
+with st.expander('⚙ Advanced settings / Data source', expanded=False):
+    st.caption('Facebook leads এবং Tele Sales orders দুটি Published Google CSV থেকে স্বয়ংক্রিয়ভাবে লোড হয়।')
+    if st.button('🔄 Refresh Google data', key='refresh_published_csv'):
         st.cache_data.clear()
         st.rerun()
-    with st.expander('Optional backup upload (only if CSV access fails)', expanded=False):
-        fb_file = st.file_uploader('Facebook CSV / Excel',type=['csv','xlsx'],key='fb_upload')
-        order_file = st.file_uploader('Tele Sales Orders CSV / Excel',type=['csv','xlsx'],key='order_upload')
+    date_preference = st.radio(
+        'Facebook Date format', ['DD-MM-YYYY / DD/MM/YYYY', 'MM/DD/YYYY'],
+        index=0, key='date_preference')
+    date_mode = 'dayfirst' if date_preference.startswith('DD-') else 'monthfirst'
+    order_date_preference = 'dayfirst'
+    window = st.slider('Maximum lead/call → order days', 0, 90, 30,
+                       help='Only an order on or after the call, and within the selected maximum days, may be attributed.')
+    facebook_orders_only = st.checkbox('Match only Facebook Lead orders', value=True,
+                       help='Exclude Existing / Cart Abandon order categories from Facebook conversion rates.')
+    with st.expander('Backup upload (optional)', expanded=False):
+        fb_file = st.file_uploader('Facebook CSV / Excel', type=['csv','xlsx'], key='fb_upload')
+        order_file = st.file_uploader('Tele Sales Orders CSV / Excel', type=['csv','xlsx'], key='order_upload')
 
 try:
     if fb_file is not None:
@@ -187,7 +191,7 @@ try:
     if raw_fb.empty:
         st.error('Facebook Published CSV-তে কোনো lead পাওয়া যায়নি।')
         st.stop()
-    st.sidebar.success('Facebook: ' + source_name)
+    # Source is shown once in Data Quality, not as a large sidebar alert.
 except Exception as exc:
     st.error('Facebook Google Sheet সংযোগ হয়নি: ' + str(exc))
     st.info('প্রথম CSV URL-এ Facebook tab-এর Date, Contact Number, Campaign Name এবং Short Code- field থাকা জরুরি।')
@@ -207,19 +211,11 @@ try:
         st.error('Tele Sales Order Published CSV-তে কোনো অর্ডার নেই।')
         st.stop()
     raw_orders.columns = raw_orders.columns.astype(str).str.strip()
-    st.sidebar.success('Orders: ' + order_source)
+    # Source is shown once in Data Quality, not as a large sidebar alert.
 except Exception as exc:
     st.error('Tele Sales Order Google Sheet সংযোগ হয়নি: ' + str(exc))
     st.info('দ্বিতীয় CSV URL-এ Order Date, Contact Number, Product Price এবং Campaign field থাকা জরুরি।')
     st.stop()
-
-with st.sidebar:
-    st.header('⚙ Analysis settings')
-    date_preference=st.radio('Facebook Date format',['DD-MM-YYYY / DD/MM/YYYY','MM/DD/YYYY'],horizontal=False,index=0)
-    date_mode='dayfirst' if date_preference.startswith('DD-') else 'monthfirst'
-    order_date_preference='dayfirst' # Excel genuine date objects are preserved.
-    window=st.slider('Order attribution window (days)',0,90,30,help='An order must occur on/after the lead/call date and within this many days to be matched.')
-    facebook_orders_only=st.checkbox('Match only Facebook Lead orders',value=True,help='Prevents other campaigns such as Existing and Cart Abandon from inflating Facebook conversion.')
 
 try:
     leads=normalize_leads(raw_fb,date_mode)
@@ -231,15 +227,15 @@ except Exception as exc:
 if facebook_orders_only and not orders.empty:
     orders=orders.loc[orders['campaign'].astype(str).str.contains(r'facebook|face\s*book|fb\s*lead',case=False,regex=True,na=False)].copy()
 
-with st.sidebar:
+# Short Code mapping is not an everyday sidebar control.
+with st.expander('⚙ Short Code classification (advanced)', expanded=False):
     all_codes=sorted([str(c) for c in calls['short_code'].unique() if str(c).strip()]) if not calls.empty else []
-    with st.expander('Short Code classification (edit anytime)',expanded=False):
-        st.caption('Only these labels count as Not Received; everything else except Unclassified is Received. Check against your team’s Short Code definitions.')
-        default_missed=[x for x in all_codes if x in NO_ANSWER_CODES]
-        missed_set=st.multiselect('Not Received codes',all_codes,default=default_missed)
-        options_unknown=[x for x in all_codes if x not in missed_set]
-        default_unknown=[x for x in options_unknown if x.lower() in UNKNOWN_CODES]
-        unknown_set=st.multiselect('Unclassified codes',options_unknown,default=default_unknown)
+    st.caption('Team-verified labels only: Not Received / Unclassified; other known codes are Received.')
+    default_missed=[x for x in all_codes if x in NO_ANSWER_CODES]
+    missed_set=st.multiselect('Not Received codes',all_codes,default=default_missed)
+    options_unknown=[x for x in all_codes if x not in missed_set]
+    default_unknown=[x for x in options_unknown if x.lower() in UNKNOWN_CODES]
+    unknown_set=st.multiselect('Unclassified codes',options_unknown,default=default_unknown)
 
 calls=set_call_status(calls,missed_set,unknown_set)
 valid_date_series=pd.concat([leads['provided_date'],calls['call_date']],ignore_index=True).dropna()
@@ -271,10 +267,6 @@ with date_filter_sidebar:
     if end < start:
         st.error('End Date অবশ্যই Start Date-এর সমান বা পরের দিন হতে হবে।')
         st.stop()
-    if future_leads or future_calls:
-        st.caption(f'⚠ Future dates in source: {future_leads:,} lead(s), '
-                   f'{future_calls:,} call(s). Default dates exclude them; '
-                   'select a future date manually to inspect.')
     campaign_options=sorted(leads['campaign'].dropna().unique().tolist())
     campaign_select=st.multiselect('Facebook Campaign / Lead Source',campaign_options,default=[])
     agent_options=sorted(leads['agent'].dropna().unique().tolist())
@@ -284,9 +276,23 @@ if campaign_select:leads=leads.loc[leads['campaign'].isin(campaign_select)].copy
 if agent_select:leads=leads.loc[leads['agent'].isin(agent_select)].copy()
 calls=calls.loc[calls['lead_id'].isin(leads['lead_id'])].copy()
 
-# Order attribution: once per order; no duplicate order value across lead/call rows.
-link_lead=attribute_to_lead(leads,orders,window)
+# AS-OF CUTOFF (inclusive): reports ending on Nov 05 must NEVER include a Nov 07 order.
+# Also exclude calls made AFTER the report end from historical received/call counts.
+# Undated calls cannot be assigned to a historical reporting period reliably.
+end_timestamp = pd.Timestamp(end)
+orders = orders.loc[orders['order_date'].notna() & orders['order_date'].le(end_timestamp)].copy()
+all_calls_before_asof = calls.copy()
+calls = calls.loc[calls['call_date'].notna() & calls['call_date'].le(end_timestamp)].copy()
+
+# For conversion, link each order to the most recent answered call preceding that order.
+# Deriving lead attribution from that exact answered call also prevents a future
+# received call from converting an earlier order in the provided-date view.
 link_call=attribute_to_received_call(calls,orders,window)
+if link_call.empty:
+    link_lead=pd.DataFrame(columns=['order_id','lead_id'])
+else:
+    link_lead=(link_call.merge(calls[['call_id','lead_id']], on='call_id', how='left')
+                [['order_id','lead_id']].drop_duplicates(subset=['order_id']))
 # If an order Campaign Name is empty, use its matched Facebook lead Campaign Name.
 # Never overwrite a campaign name already present in Tele Sales Order.
 if not orders.empty and not link_lead.empty:
@@ -305,13 +311,14 @@ call_dates=selected_between(call_all,'call_date',start,end)
 unmatched_lead_dates=int(leads['provided_date'].isna().sum())
 undated_call=int(calls['call_date'].isna().sum())
 
-st.caption(f'Facebook records loaded: {len(leads):,} | Calls extracted: {len(calls):,} | Eligible order records: {len(orders):,} | Period: {start:%d %b %Y} – {end:%d %b %Y}')
+st.caption(f'Facebook leads: {len(leads):,} | Dated calls up to end: {len(calls):,} | Eligible orders up to end: {len(orders):,} | Period: {start:%d %b %Y} – {end:%d %b %Y}')
+st.caption('Reporting rule: End Date-এর পরের কোনো Order গণনা হবে না। Data Provided report সর্বদা Lead Date-এ, Call Date report সর্বদা Call Date-এ; Order Sheet-এর আলাদা Order Date view-তে শুধু Order-এর নিজস্ব তারিখ ব্যবহার হয়।')
 
 t1,t2,t3,t4,t5=st.tabs(['📆 1 · Data Provided Date','📞 2 · Call Date','🎯 3 · Campaign Conversion + ৳','💰 4 · Order Sheet Campaigns','🔎 5 · Data Quality'])
 
 with t1:
     st.markdown('<div class="section">Data Provided Date — lead cohort report</div>',unsafe_allow_html=True)
-    st.markdown('<div class="note">Date = Facebook column A (data provided). Received lead = at least one answered call across all follow-ups. Orders are matched by phone and attributed to the latest eligible lead within the chosen days. Contact Rate = received leads ÷ provided leads; Conversion = unique buying phone numbers ÷ unique received phone numbers.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="note"><b>Data Provided Date = Lead-এর নিজস্ব তারিখ (Facebook column A).</b> অর্ডার পরে হলেও এই রিপোর্টে শুধু Lead-এর মূল তারিখের সারিতে যোগ হবে; Order Date-এর সারিতে সরবে না। যেমন ৫ নভেম্বর Lead, ৭ নভেম্বর Order হলে End Date ৫ নভেম্বর পর্যন্ত অর্ডার ০, End Date ৭ নভেম্বর হলে Data Provided <b>৫ নভেম্বরের</b> সারিতে অর্ডার ১ ও Revenue যোগ হবে। <b>শুধু ৭ নভেম্বরের Data Provided রিপোর্টে এই Lead দেখাবে না।</b> Received = End Date-এর মধ্যে উত্তর দেওয়া কল; Conversion = Unique Buying Customers ÷ Unique Received Customers.</div>',unsafe_allow_html=True)
     a=lead_metrics(provided)
     metric_card_columns([
         ('Data Provided',f"{a['Data']:,}",'Lead rows received in period'),
@@ -357,7 +364,7 @@ with t1:
 
 with t2:
     st.markdown('<div class="section">Call Date — call activity report</div>',unsafe_allow_html=True)
-    st.markdown('<div class="note">Call Date = 1st through 10th call dates. Each attempt is one call; unique reached leads and attributed orders are separately deduplicated. Orders are attributed to the most recent earlier **Received** call within the chosen days. Answer Rate = received attempts ÷ all attempts; Conversion = unique buying phone numbers ÷ unique received phone numbers.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="note">Call Date = 1st through 10th call dates. Each attempt is one call; unique reached leads and attributed orders are separately deduplicated. Orders are attributed to the most recent earlier **Received** call within the chosen days; an order after End Date is never included. Answer Rate = received attempts ÷ all attempts; Conversion = unique buying phone numbers ÷ unique received phone numbers.</div>',unsafe_allow_html=True)
     b=call_metrics(call_dates)
     metric_card_columns([
         ('Total Calls',f"{b['Calls']:,}",'All recorded call attempts dated in the period'),
@@ -471,6 +478,14 @@ with t4:
     cmp=campaign_order_report(o,dimension)
     if not cmp.empty:horizontal_bar(cmp,'Campaign','Order Value','Campaign-wise order revenue',top=20)
     report_table(cmp,'campaign_orders.csv')
+    st.subheader('Order Date-wise Sales')
+    if not o.empty:
+        order_daily = (o.groupby('order_date',as_index=False)
+                          .agg(Orders=('order_id','nunique'), **{'Order Value':('order_value','sum')}))
+        order_daily = order_daily.rename(columns={'order_date':'Order Day'})
+        report_table(order_daily,'order_date_daily_sales.csv')
+    else:
+        st.info('No orders placed in the selected period.')
     st.subheader('Product-wise Order Report')
     products=product_order_report(o)
     if not products.empty:horizontal_bar(products,'Product','Qty','Products ordered (QTY)',top=15)
@@ -487,6 +502,9 @@ with t4:
 with t5:
     st.markdown('<div class="section">Data Quality & Attribution Rules</div>',unsafe_allow_html=True)
     received_count=int((calls['status']=='Received').sum())
+    st.caption(f'Data sources: Facebook — {source_name} | Orders — {order_source}')
+    if future_leads or future_calls:
+        st.warning(f'Future-dated source records: {future_leads:,} lead(s), {future_calls:,} call(s). Not included in default period.')
     st.write({'Facebook loaded lead rows':len(leads), 'Leads without parseable provided date':unmatched_lead_dates,
               'Calls without parseable call date':undated_call,'Calls classified Received':received_count,
               'Calls classified Not Received':int((calls['status']=='Not Received').sum()),
@@ -498,7 +516,8 @@ with t5:
 - One Short Code + corresponding call date = one attempted call; calls without valid dates are available for the provided-date report, not the call-date report.
 - Contact/Answer Rates are distinct from Conversion Rates. Only a **Received** lead/call may contribute to the conversion numerator.
 - Every eligible order is attributed **at most once** for each attribution model, to the latest prior lead or latest prior answered call within the attribution window.
-- Orders placed after the selected date period can appear in a cohort's revenue if they fall within the attribution window. This is intentional, not same-day order revenue.
+- **As-of rule:** Orders dated after selected End Date never appear in any conversion, order count or revenue. A call on 5 Nov resulting in an order on 7 Nov contributes 0 to a report ending 5 Nov, and can contribute to a report ending 7 Nov when the 5 Nov call/lead is inside the date range.
+- Calls after End Date, and calls without a valid date, are excluded from historical call metrics. This avoids counting future conversations as already received.
 - The Facebook tab has **Campaign Name**, not a separate Source column. The dashboard labels Campaign Name as the lead source; Tele Sales Order provides its own Campaign and Campaign Name fields.
 - Dropdown Short Code classification is editable in the sidebar. Codes without a confirmed meaning should be assigned to Unclassified.
 - Both date-report modes use the selected period, but their denominators differ: **lead rows** in Provided Date versus **call attempts** in Call Date. Conversion uses unique reached phone numbers.
