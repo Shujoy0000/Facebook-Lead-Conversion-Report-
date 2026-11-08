@@ -110,9 +110,33 @@ def classify_short_code(code, no_answer=None, unknown=None):
     return 'Received'
 
 
+def is_confirmed_order_short_code(code):
+    """Only the explicit 1st–10th call Short Code 'অর্ডার করেছেন' means conversion.
+
+    Similar but different statuses (e.g. pre-order, will order later) are NOT
+    converted. Whitespace around the dropdown value is harmless.
+    """
+    text = re.sub(r'\s+', ' ', str(code).strip()).casefold()
+    return text in {'অর্ডার করেছেন', 'order confirmed', 'ordered', 'order placed'}
+
+
 def set_call_status(calls, not_received, unclassified):
     out = calls.copy()
+    out['confirmed_order'] = out['short_code'].map(is_confirmed_order_short_code).fillna(False).astype(bool)
     out['status'] = out['short_code'].map(lambda x: classify_short_code(x, set(not_received), set(unclassified)))
+    # A confirmed order necessarily implies a reached customer.
+    out.loc[out['confirmed_order'], 'status'] = 'Received'
+
+    # A lead may show 'অর্ডার করেছেন' more than once across 1st–10th calls.
+    # Attribute its conversion to the FIRST dated confirmed call only.
+    # Use original lead_id to avoid double-counting a follow-up; summary buyers
+    # are additionally de-duplicated by phone number across lead rows.
+    out['conversion_event'] = False
+    verified = out.loc[out['confirmed_order'] & out['call_date'].notna()].copy()
+    if not verified.empty:
+        first = (verified.sort_values(['lead_id', 'call_date', 'call_number', 'call_id'])
+                .drop_duplicates(subset=['lead_id'], keep='first'))
+        out.loc[first.index, 'conversion_event'] = True
     return out
 
 
@@ -132,14 +156,18 @@ def normalize_orders(raw, preference='dayfirst'):
     df['order_date'] = dates(df['Order Date'], preference).dt.normalize()
     df['campaign'] = blank_to(_series(df, 'Campaign'), 'Unknown Campaign')
     df['campaign_name'] = blank_to(_series(df, 'Campaign Name'), '')
-    df['order_campaign_label'] = df['campaign_name'].where(df['campaign_name'].ne(''), df['campaign'])
+    # Campaign Name may legitimately be blank. Preserve it; never replace with
+    # Facebook lead campaign or the broader Campaign category.
+    df['order_campaign_label'] = df['campaign_name']
     price = numeric(_series(df,'Product Price',0))
     gross_total = numeric(_series(df,'Total Amount',0))
     shipping = numeric(_series(df,'Shipping Charge',0))
     df['order_value'] = price.where(price > 0, (gross_total-shipping).clip(lower=0))
     df['qty'] = numeric(_series(df,'Total Qty',0))
     df['order_collector'] = blank_to(_series(df,'Order Collector'), 'Unknown Agent')
-    df = df.loc[df['order_date'].notna() & df['phone'].ne('')].copy()
+    # All dated orders must count in Order Date reports even if the phone is
+    # missing / differently formatted. Phone is needed ONLY for optional lead attribution.
+    df = df.loc[df['order_date'].notna()].copy()
     return df
 
 
@@ -205,9 +233,10 @@ def build_provided_view(leads, calls, lead_order_links, orders):
             received_calls=('status',lambda x: (x=='Received').sum()),
             missed_calls=('status',lambda x: (x=='Not Received').sum()),
             unknown_calls=('status',lambda x: (x=='Unclassified').sum()),
+            confirmed_calls=('conversion_event', 'sum'),
         )
         base = base.join(group,on='lead_id')
-    for c in ['attempts','received_calls','missed_calls','unknown_calls']:
+    for c in ['attempts','received_calls','missed_calls','unknown_calls','confirmed_calls']:
         if c not in base:
             base[c]=0
         base[c] = base[c].fillna(0).astype(int)
@@ -215,7 +244,10 @@ def build_provided_view(leads, calls, lead_order_links, orders):
     base['received'] = base['received_calls'] > 0
     base['not_received'] = base['called'] & ~base['received'] & base['missed_calls'].gt(0)
     base = linked_order_summary(base,'lead_id',lead_order_links,orders)
-    base['converted'] = base['received'] & base['orders'].gt(0)
+    # Facebook team records confirmed conversions in 1st–10th Short Code,
+    # not in Outcome and not necessarily in the order file under the same phone.
+    base['confirmed'] = base['confirmed_calls'].gt(0)
+    base['converted'] = base['received'] & base['confirmed']
     return base
 
 
@@ -224,7 +256,9 @@ def build_call_view(calls, call_order_links, orders):
     base['received'] = base['status'].eq('Received')
     base['not_received'] = base['status'].eq('Not Received')
     base['unclassified'] = base['status'].eq('Unclassified')
-    base['converted'] = base['received'] & base['orders'].gt(0)
+    base['confirmed'] = base['confirmed_order'].fillna(False).astype(bool)
+    # Only the first dated 'অর্ডার করেছেন' event for each lead is a conversion.
+    base['converted'] = base['conversion_event'].fillna(False).astype(bool)
     return base
 
 
@@ -321,10 +355,12 @@ def campaign_conversion_report(view, kind='provided'):
             lead_count = len(grp)
             attempts = len(received)
         unique_reached = received.loc[received['phone'].ne(''), 'phone'].nunique()
-        buying = received[received['orders'].gt(0)]
+        # Confirmed conversions come from the Facebook Short Code.
+        # Attributed order rows/revenue are a separate optional reconciliation.
+        buying = received.loc[received['converted']]
         buyers = buying.loc[buying['phone'].ne(''), 'phone'].nunique()
-        order_count = int(buying['orders'].sum())
-        value = float(buying['order_value'].sum())
+        order_count = int(grp['orders'].sum())
+        value = float(grp['order_value'].sum())
         results.append({
             'Campaign': campaign,
             'Provided Leads' if kind == 'provided' else 'Call Attempts': lead_count,
@@ -351,10 +387,10 @@ def campaign_conversion_total(view, kind='provided'):
                 'Order Value': 0., 'Conversion Rate': 0., 'AOV': 0., 'Revenue Share %': 0.}
     received = view[view['received'].eq(True)] if kind == 'provided' else view[view['status'].eq('Received')]
     unique = received.loc[received['phone'].ne(''), 'phone'].nunique()
-    buyers_df = received[received['orders'].gt(0)]
+    buyers_df = received.loc[received['converted']]
     buyers = buyers_df.loc[buyers_df['phone'].ne(''), 'phone'].nunique()
-    orders = int(buyers_df['orders'].sum())
-    amount = float(buyers_df['order_value'].sum())
+    orders = int(view['orders'].sum())
+    amount = float(view['order_value'].sum())
     calls = int(view['received_calls'].sum()) if kind == 'provided' else len(received)
     return {'Campaign': 'TOTAL', metric: len(view), 'Received Calls': calls,
             'Unique Reached': int(unique), 'Buying Customers': int(buyers),
