@@ -281,6 +281,9 @@ calls=calls.loc[calls['lead_id'].isin(leads['lead_id'])].copy()
 # Undated calls cannot be assigned to a historical reporting period reliably.
 end_timestamp = pd.Timestamp(end)
 orders = orders.loc[orders['order_date'].notna() & orders['order_date'].le(end_timestamp)].copy()
+# Order Date report is independent of Facebook lead/phone matching.
+# This is deliberately separate from the Data Provided / Call cohort reports.
+facebook_orders_by_order_date = selected_between(orders, 'order_date', start, end)
 all_calls_before_asof = calls.copy()
 calls = calls.loc[calls['call_date'].notna() & calls['call_date'].le(end_timestamp)].copy()
 
@@ -293,16 +296,9 @@ if link_call.empty:
 else:
     link_lead=(link_call.merge(calls[['call_id','lead_id']], on='call_id', how='left')
                 [['order_id','lead_id']].drop_duplicates(subset=['order_id']))
-# If an order Campaign Name is empty, use its matched Facebook lead Campaign Name.
-# Never overwrite a campaign name already present in Tele Sales Order.
-if not orders.empty and not link_lead.empty:
-    match_names = (link_lead.merge(leads[['lead_id','campaign']], on='lead_id', how='left')
-                    .set_index('order_id')['campaign'])
-    orders = orders.copy()
-    match_names = orders['order_id'].map(match_names).fillna('')
-    fallback = orders['campaign_name'].astype(str).str.strip().eq('')
-    known = match_names.ne('') & match_names.ne('Unknown Campaign')
-    orders.loc[fallback & known,'order_campaign_label'] = match_names.loc[fallback & known].values
+# IMPORTANT: Do NOT fill blank order Campaign Name from lead Campaign Name.
+# Facebook Campaign/Lead Source and Order Campaign Name are different fields.
+# The order is still counted even when Order Campaign Name is blank or phone cannot match.
 provided_all=build_provided_view(leads,calls,link_lead,orders)
 call_all=build_call_view(calls,link_call,orders)
 provided=selected_between(provided_all,'provided_date',start,end)
@@ -318,7 +314,7 @@ t1,t2,t3,t4,t5=st.tabs(['📆 1 · Data Provided Date','📞 2 · Call Date','�
 
 with t1:
     st.markdown('<div class="section">Data Provided Date — lead cohort report</div>',unsafe_allow_html=True)
-    st.markdown('<div class="note"><b>Data Provided Date = Lead-এর নিজস্ব তারিখ (Facebook column A).</b> অর্ডার পরে হলেও এই রিপোর্টে শুধু Lead-এর মূল তারিখের সারিতে যোগ হবে; Order Date-এর সারিতে সরবে না। যেমন ৫ নভেম্বর Lead, ৭ নভেম্বর Order হলে End Date ৫ নভেম্বর পর্যন্ত অর্ডার ০, End Date ৭ নভেম্বর হলে Data Provided <b>৫ নভেম্বরের</b> সারিতে অর্ডার ১ ও Revenue যোগ হবে। <b>শুধু ৭ নভেম্বরের Data Provided রিপোর্টে এই Lead দেখাবে না।</b> Received = End Date-এর মধ্যে উত্তর দেওয়া কল; Conversion = Unique Buying Customers ÷ Unique Received Customers.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="note"><b>Data Provided Date</b> = Facebook Lead দেওয়া তারিখ। <b>Confirmed Conversion</b> = ১ম, ২য়, ... ১০ম—যেকোনো কলের Short Code <b>অর্ডার করেছেন</b> হলে সেই Lead একবার Converted। প্রথম নিশ্চিতকরণের Call Date নির্বাচিত End Date-এর মধ্যে থাকতে হবে। ৫ নভেম্বর দেওয়া Lead ৭ নভেম্বর confirm হলে ১–৫ নভেম্বরের রিপোর্টে Conversion হবে না; ১–৭ নভেম্বর নিলে ৫ নভেম্বরের Lead row-তে Conversion হবে। <b>Order Date-এর মোট Orders/Value</b> আলাদা সংখ্যা: এটি Order Sheet-এর Facebook Lead ক্যাটাগরির সব অর্ডার, ফোন নম্বর বা Campaign Name match হওয়া বাধ্যতামূলক নয়।</div>',unsafe_allow_html=True)
     a=lead_metrics(provided)
     metric_card_columns([
         ('Data Provided',f"{a['Data']:,}",'Lead rows received in period'),
@@ -326,18 +322,29 @@ with t1:
         ('Received Leads',f"{a['Received']:,}",'Lead rows with at least one answered call'),
         ('Not Received',f"{a['Not_Received']:,}",'Attempted lead rows without a received call, but with a not-received result'),
         ('Contact Rate',pct(a['Contact_Rate']),'Received leads / all provided leads'),
-        ('Conversion Rate',pct(a['Conversion_Rate']),'Unique buying phone numbers / unique reached phone numbers'),
+        ('Conversion Rate',pct(a['Conversion_Rate']),'Unique customers with Short Code = অর্ডার করেছেন / unique received customers'),
         ('Not Called',f"{a['Not_Called']:,}",'No recorded attempts'),
         ('Call Attempts',f"{a['Calls']:,}",'Includes follow-up calls'),
         ('Received Calls',f"{a['Received_Calls']:,}",'Number of received attempts'),
-        ('Orders',f"{a['Orders']:,}",'Matched order records, counted only once'),
-        ('Buying Customers',f"{a['Buyers']:,}",'Unique phone numbers with a received call and an order'),
-        ('Order Value',money(a['Order_Value']),'Sum of matched final Product Price (net price fallback)')
+        ('Facebook Orders (Order Date)',f"{len(facebook_orders_by_order_date):,}",'All Facebook Lead orders placed within the selected date range, regardless of phone match'),
+        ('Confirmed Buyers',f"{a['Buyers']:,}",'Unique received phone numbers with Short Code = অর্ডার করেছেন'),
+        ('Order Value (Order Date)',money(facebook_orders_by_order_date['order_value'].sum()),'All Facebook Lead orders in date range; Product Price, including blank Campaign Name')
     ])
     day=group_metrics(provided,'provided_date')
     if not day.empty:day=day.rename(columns={'provided_date':'Day'})
     daily_chart(day,'provided')
-    st.subheader('Day-wise Data Provided Report')
+    st.subheader('Facebook Orders by Order Date (all Facebook Lead orders)')
+    st.caption('Order Sheet-এর Campaign = Facebook Lead. Order Date অনুযায়ী সব Order ও Product Price; Campaign Name ফাঁকা থাকলেও অর্ডার বাদ যাবে না। এই টেবিলের Order Day, Data Provided Day-এর সমান হওয়ার প্রয়োজন নেই।')
+    if not facebook_orders_by_order_date.empty:
+        date_orders = facebook_orders_by_order_date.groupby('order_date', as_index=False).agg(
+            Orders=('order_id','nunique'), **{'Order Value':('order_value','sum')}
+        ).rename(columns={'order_date':'Order Day'})
+        report_table(date_orders, 'facebook_orders_by_order_date.csv')
+        st.subheader('Order Campaign Name & Amount (blank names retained)')
+        report_table(campaign_order_report(facebook_orders_by_order_date, 'campaign_name'), 'facebook_orders_by_campaign_name.csv')
+    else:
+        st.info('নির্বাচিত Order Date-এ কোনো Facebook Lead Order পাওয়া যায়নি।')
+    st.subheader('Day-wise Data Provided Report (confirmed conversions credited to Lead Date)')
     report_table(day,'data_provided_daily.csv')
     st.subheader('Campaign / Lead Source-wise Report')
     camp=group_metrics(provided,'campaign').sort_values('Data',ascending=False) if not provided.empty else pd.DataFrame()
@@ -364,7 +371,7 @@ with t1:
 
 with t2:
     st.markdown('<div class="section">Call Date — call activity report</div>',unsafe_allow_html=True)
-    st.markdown('<div class="note">Call Date = 1st through 10th call dates. Each attempt is one call; unique reached leads and attributed orders are separately deduplicated. Orders are attributed to the most recent earlier **Received** call within the chosen days; an order after End Date is never included. Answer Rate = received attempts ÷ all attempts; Conversion = unique buying phone numbers ÷ unique received phone numbers.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="note"><b>Call Date</b> = ১ম–১০ম কলের আলাদা তারিখ। যে কলের Short Code <b>অর্ডার করেছেন</b>, সেই কলেই Conversion হবে (এক Lead-এর প্রথম confirmed call-এ একবার)। Order Sheet matching Conversion নির্ধারণ করে না। End Date-এর পরের call/order যোগ হবে না। Answer Rate = Received Calls ÷ Total Call Attempts; Conversion Rate = Unique Confirmed Customers ÷ Unique Received Customers.</div>',unsafe_allow_html=True)
     b=call_metrics(call_dates)
     metric_card_columns([
         ('Total Calls',f"{b['Calls']:,}",'All recorded call attempts dated in the period'),
@@ -373,12 +380,12 @@ with t2:
         ('Unclassified',f"{b['Unclassified']:,}",'Missing/ambiguous codes'),
         ('Answer Rate',pct(b['Answer_Rate']),'Received call attempts / total call attempts'),
         ('Not Received %',pct(b['Missed_Rate']),'Not received call attempts / total call attempts'),
-        ('Conversion Rate',pct(b['Conversion_Rate']),'Unique buying phone numbers / unique reached phone numbers'),
+        ('Conversion Rate',pct(b['Conversion_Rate']),'Unique customers with Short Code = অর্ডার করেছেন / unique received customers'),
         ('Unique Leads Called',f"{b['Unique_Called']:,}",'Unique phone numbers receiving one or more calls'),
         ('Unique Leads Reached',f"{b['Unique_Received']:,}",'Unique phone numbers reached'),
-        ('Buying Customers',f"{b['Buyers']:,}",'Unique phone numbers with a received call and an attributed order'),
-        ('Orders',f"{b['Orders']:,}",'Unique order rows attributed to a received call'),
-        ('Order Value',money(b['Order_Value']),'Order value attributed to received calls')
+        ('Buying Customers',f"{b['Buyers']:,}",'Unique confirmed customers by 1st–10th call Short Code'),
+        ('Matched Orders',f"{b['Orders']:,}",'Order Sheet rows matched by date/phone, separate from confirmed conversions'),
+        ('Matched Order Value',money(b['Order_Value']),'Order Sheet amount matched by date/phone, separate from confirmed conversions')
     ])
     d2=group_metrics(call_dates,'call_date',kind='call')
     if not d2.empty:d2=d2.rename(columns={'call_date':'Day'})
@@ -393,22 +400,45 @@ with t2:
         report_table(group_metrics(call_dates,['call_date','campaign'],kind='call'),'call_date_day_campaign.csv')
     with st.expander('Agent-wise Call Report',expanded=False):
         report_table(group_metrics(call_dates,'agent',kind='call'),'call_date_agents.csv')
-    st.subheader('Call Number / Follow-up Efficiency')
-    report_table(group_metrics(call_dates,'call_number',kind='call'),'call_number_efficiency.csv')
+    st.subheader('1st–10th Call Conversion Report (Short Code Based)')
+    st.caption('অর্ডার করেছেন যে নম্বর কলের Short Code-এ প্রথম এসেছে, Conversion সেই Call Number-এ একবার গণনা হবে। Pre-order / future follow-up = Conversion নয়।')
+    per_call = group_metrics(call_dates, 'call_number', kind='call')
+    if not per_call.empty:
+        first_conv = (call_dates.loc[call_dates['conversion_event']]
+                      .groupby('call_number').size().rename('Confirmed Conversions'))
+        per_call = per_call.join(first_conv, on='call_number')
+        per_call['Confirmed Conversions'] = per_call['Confirmed Conversions'].fillna(0).astype(int)
+        per_call['Share of All Conversions %'] = (
+            100 * per_call['Confirmed Conversions'] / max(int(per_call['Confirmed Conversions'].sum()), 1)
+        )
+        per_call = per_call.rename(columns={'call_number': 'Call Number'}).sort_values('Call Number')
+    report_table(per_call, 'conversion_by_1st_to_10th_call.csv')
     st.subheader('Short Code-wise Report & Percentages')
     if not call_dates.empty:
-        code_stats=call_dates.groupby(['short_code','status']).agg(Calls=('call_id','count'),Orders=('orders','sum'), **{'Order Value':('order_value','sum')}).reset_index().sort_values('Calls',ascending=False)
+        code_stats=call_dates.groupby(['short_code','status']).agg(
+            Calls=('call_id','count'),
+            **{'Confirmed Conversions':('conversion_event','sum')},
+            Orders=('orders','sum'),
+            **{'Order Value':('order_value','sum')}
+        ).reset_index().sort_values('Calls',ascending=False)
         code_stats['%']=100*code_stats['Calls']/max(len(call_dates),1)
+        code_stats['Conversion Share %']=(100*code_stats['Confirmed Conversions'] /
+                   max(int(code_stats['Confirmed Conversions'].sum()), 1))
         report_table(code_stats,'call_date_short_codes.csv')
         with st.expander('Short Code × Campaign (share of source calls)',expanded=False):
-            by_source=call_dates.groupby(['campaign','short_code','status']).agg(Calls=('call_id','count'),Orders=('orders','sum'),**{'Order Value':('order_value','sum')}).reset_index()
+            by_source=call_dates.groupby(['campaign','short_code','status']).agg(
+                Calls=('call_id','count'),
+                **{'Confirmed Conversions':('conversion_event','sum')},
+                Orders=('orders','sum'),
+                **{'Order Value':('order_value','sum')}
+            ).reset_index()
             by_source['%']=100*by_source['Calls']/by_source.groupby('campaign')['Calls'].transform('sum')
             report_table(by_source.sort_values(['campaign','Calls'],ascending=[True,False]),'call_short_codes_by_campaign.csv')
     else:st.info('No call-date rows in this period.')
 
 with t3:
     st.markdown('<div class="section">Facebook Campaign → Converted Customers → Orders → Amount</div>',unsafe_allow_html=True)
-    st.markdown('<div class="note">**Lead Campaign** comes from Facebook → Campaign Name; **order revenue** comes from Tele Sales Order CSV → Product Price. Only orders matched to an answered call are counted as conversions. Conversion Rate = unique buying phone numbers ÷ unique reached phone numbers × 100. Repeat calls and repeat orders do not inflate buyer counts.</div>',unsafe_allow_html=True)
+    st.markdown('<div class="note"><b>Confirmed Conversion</b> is based on Facebook Short Code <b>অর্ডার করেছেন</b> among calls dated up to End Date, NOT on order-file phone matching. Conversion Rate = distinct confirmed reached phone numbers ÷ distinct reached phone numbers. <b>Order Value in this campaign attribution table</b> is the portion matched by phone/date. <b>All Facebook Lead order amounts (including unmatched phones / blank Campaign Name)</b> are shown in Order Sheet Campaigns and the Order Date summary in the first report.</div>',unsafe_allow_html=True)
     mode=st.radio('Campaign conversion by', ['Data Provided Date','Call Date'],horizontal=True,key='conv_campaign_mode')
     kind='provided' if mode.startswith('Data') else 'call'
     cohort=provided if kind=='provided' else call_dates
@@ -417,10 +447,10 @@ with t3:
     metric_card_columns([
         ('Facebook Campaigns',f'{len(conv):,}','Distinct Facebook Campaign Name labels in the selected date mode'),
         ('Unique Reached',f"{total['Unique Reached']:,}",'Unique phone numbers whose calls were received'),
-        ('Buying Customers',f"{total['Buying Customers']:,}",'Unique received phone numbers with a matched order'),
-        ('Converted Orders',f"{total['Orders']:,}",'Unique matched order rows for reached leads'),
-        ('Conversion Rate',pct(total['Conversion Rate']),'Buying Customers / Unique Reached'),
-        ('Converted Revenue',money(total['Order Value']),'Matched order net Product Price total'),
+        ('Buying Customers',f"{total['Buying Customers']:,}",'Unique phone numbers with Short Code = অর্ডার করেছেন'),
+        ('Matched Orders',f"{total['Orders']:,}",'Orders successfully matched by phone and date; separate from confirmed conversions'),
+        ('Conversion Rate',pct(total['Conversion Rate']),'Unique confirmed customers / unique received customers'),
+        ('Matched Revenue',money(total['Order Value']),'Matched portion only; all Facebook Lead Order Date revenue is shown in Order Sheet Campaigns'),
     ])
     st.subheader('Campaign-wise Conversion & Order Amount')
     if not conv.empty:
@@ -444,7 +474,7 @@ with t3:
                 first=['Day','Campaign']
                 report_table(by_day[first+[x for x in by_day.columns if x not in first]].sort_values(['Day','Order Value'],ascending=[True,False]),'campaign_conversion_daily.csv')
     st.subheader('Cross-check: Facebook Campaign × Tele Sales Order Campaign')
-    st.caption('Facebook campaign shows the lead source; Order Campaign and Order Campaign Name come from the actual order workbook. Blank order Campaign Name is explicitly shown as “(not supplied)”, never guessed.')
+    st.caption('Facebook Campaign Name is the lead source. Order Campaign Name is the actual order field and may remain blank; blank names never remove orders or amount. This cross-check includes only phone/date matched orders; the Order Sheet Campaigns tab contains all Facebook Lead order amounts.')
     matching_links=link_lead if kind=='provided' else link_call
     key='lead_id' if kind=='provided' else 'call_id'
     source_detail=campaign_order_attribution_detail(matching_links,key,cohort,orders)
@@ -457,7 +487,7 @@ with t3:
 
 with t4:
     st.markdown('<div class="section">Order & Campaign Performance</div>',unsafe_allow_html=True)
-    st.caption('Final order value = Tele Sales order sheet "Product Price"; fallback when blank/zero: Total Amount − Shipping Charge. It does not add discount twice.')
+    st.caption('Source: orders with Campaign = Facebook Lead. Each order is counted by its Order Date and last Product Price; blank Campaign Name remains blank. If Product Price is zero/missing only, fallback is Total Amount minus Shipping Charge. No phone match required for this report.')
     report_type=st.radio('Which orders?', ['All eligible Tele Sales Orders (Order Date)','Matched Facebook data leads (Data Provided Date)','Matched Received calls (Call Date)'],horizontal=False)
     if report_type.startswith('All'):
         o=selected_between(orders,'order_date',start,end)
@@ -473,7 +503,7 @@ with t4:
         ('Revenue',money(o['order_value'].sum()) if not o.empty else money(0),'Product Price summed across orders'),
         ('AOV',money(o['order_value'].sum()/len(o)) if len(o) else money(0),'Order Value / Orders')
     ])
-    dim=st.selectbox('Campaign breakdown',('Campaign Name (fallback Campaign)','Campaign (category)'),index=0)
+    dim=st.selectbox('Campaign breakdown',('Campaign Name (blank preserved)','Campaign (category)'),index=0)
     dimension='order_campaign_label' if dim.startswith('Campaign Name') else 'campaign'
     cmp=campaign_order_report(o,dimension)
     if not cmp.empty:horizontal_bar(cmp,'Campaign','Order Value','Campaign-wise order revenue',top=20)
@@ -502,6 +532,7 @@ with t4:
 with t5:
     st.markdown('<div class="section">Data Quality & Attribution Rules</div>',unsafe_allow_html=True)
     received_count=int((calls['status']=='Received').sum())
+    undated_confirmations = int((all_calls_before_asof['call_date'].isna() & all_calls_before_asof['short_code'].map(lambda s: 'অর্ডার করেছেন' in str(s))).sum())
     st.caption(f'Data sources: Facebook — {source_name} | Orders — {order_source}')
     if future_leads or future_calls:
         st.warning(f'Future-dated source records: {future_leads:,} lead(s), {future_calls:,} call(s). Not included in default period.')
@@ -509,16 +540,22 @@ with t5:
               'Calls without parseable call date':undated_call,'Calls classified Received':received_count,
               'Calls classified Not Received':int((calls['status']=='Not Received').sum()),
               'Unclassified calls':int((calls['status']=='Unclassified').sum()),
-              'Order rows after campaign scope':len(orders),
+              'Confirmed dated calls up to End Date':int(calls['confirmed_order'].sum()),
+              'Undated confirmed codes (not assigned to historical date)':undated_confirmations,
+              'Order rows after campaign scope (up to End Date)':len(orders),
+              'Facebook orders in selected Order Date range':len(facebook_orders_by_order_date),
+              'Facebook order value in selected Order Date range':float(facebook_orders_by_order_date['order_value'].sum()),
               'Orders linked to leads':len(link_lead),'Orders linked to received calls':len(link_call)})
     st.markdown('''**Important definitions**
 - One Facebook row = one provided lead record. Repeated telephone numbers in separate lead rows remain separate lead records.
 - One Short Code + corresponding call date = one attempted call; calls without valid dates are available for the provided-date report, not the call-date report.
-- Contact/Answer Rates are distinct from Conversion Rates. Only a **Received** lead/call may contribute to the conversion numerator.
+- **Confirmed Conversion**: a dated Short Code contains **অর্ডার করেছেন** (across all 1st–10th follow-ups); count unique reached phone numbers. A mere phone/order-sheet match does not create a confirmed conversion.
+- Contact/Answer Rates are distinct from Conversion Rates. Only a **Received** lead/call with the confirmed code may contribute to the conversion numerator.
+- **Order Sheet amounts**: all Facebook Lead orders within the selected Order Date range are counted even when Campaign Name or phone is blank. The last Product Price column is used; phone-matched attribution reports are a separate subset.
 - Every eligible order is attributed **at most once** for each attribution model, to the latest prior lead or latest prior answered call within the attribution window.
 - **As-of rule:** Orders dated after selected End Date never appear in any conversion, order count or revenue. A call on 5 Nov resulting in an order on 7 Nov contributes 0 to a report ending 5 Nov, and can contribute to a report ending 7 Nov when the 5 Nov call/lead is inside the date range.
 - Calls after End Date, and calls without a valid date, are excluded from historical call metrics. This avoids counting future conversations as already received.
-- The Facebook tab has **Campaign Name**, not a separate Source column. The dashboard labels Campaign Name as the lead source; Tele Sales Order provides its own Campaign and Campaign Name fields.
+- Facebook has **Campaign Name** (lead source); Tele Sales Orders has **Campaign** (e.g. Facebook Lead) and separately **Campaign Name**, which can stay blank. No blank-name order is discarded.
 - Dropdown Short Code classification is editable in the sidebar. Codes without a confirmed meaning should be assigned to Unclassified.
 - Both date-report modes use the selected period, but their denominators differ: **lead rows** in Provided Date versus **call attempts** in Call Date. Conversion uses unique reached phone numbers.
 ''')
