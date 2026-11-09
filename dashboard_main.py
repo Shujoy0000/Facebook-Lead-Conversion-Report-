@@ -162,13 +162,26 @@ def prepare_lead_sheet(raw, source_label, source_no):
     ]
     pairs = call_columns(frame)
     events = []
+    missing_result_events = []
+    event_columns = ['row_uid','lead_key','phone','campaign','agent','source','provided_date']
     for number, code_col, when_col in pairs:
         codes = string_series(frame, code_col).loc[d.index]
         when = parse_date(string_series(frame, when_col)).loc[d.index]
-        mask = codes.ne('') | when.notna()
+
+        # A date with a blank Short Code is NOT evidence that a call was made.
+        # Keep it for transparent data-quality auditing instead of calling it an attempt.
+        missing = codes.eq('') & when.notna()
+        if missing.any():
+            pending = d.loc[missing, event_columns].copy()
+            pending['call_no'] = int(number)
+            pending['call_date'] = when.loc[missing]
+            missing_result_events.append(pending)
+
+        # The official call metrics are based on recorded Short Code outcomes.
+        mask = codes.ne('')
         if not mask.any():
             continue
-        x = d.loc[mask, ['row_uid','lead_key','phone','campaign','agent','source','provided_date']].copy()
+        x = d.loc[mask, event_columns].copy()
         x['call_no'] = int(number)
         x['short_code'] = codes.loc[mask]
         x['call_date'] = when.loc[mask]
@@ -176,14 +189,16 @@ def prepare_lead_sheet(raw, source_label, source_no):
     calls = pd.concat(events, ignore_index=True) if events else pd.DataFrame(columns=[
         'row_uid','lead_key','phone','campaign','agent','source','provided_date',
         'call_no','short_code','call_date'])
+    missing_results = pd.concat(missing_result_events, ignore_index=True) if missing_result_events else pd.DataFrame(columns=[
+        'row_uid','lead_key','phone','campaign','agent','source','provided_date','call_no','call_date'])
     notes = {'source': source_label, 'rows': len(d), 'missing_dates': int(d.provided_date.isna().sum()),
              'short_code_fields': len(pairs)}
-    return d.reset_index(drop=True), calls, notes
+    return d.reset_index(drop=True), calls, notes, missing_results
 
 
 def build_leads(raw1, raw2):
-    d1, c1, n1 = prepare_lead_sheet(raw1, 'Facebook Sheet 1', 1)
-    d2, c2, n2 = prepare_lead_sheet(raw2, 'Facebook Sheet 2', 2)
+    d1, c1, n1, p1 = prepare_lead_sheet(raw1, 'Facebook Sheet 1', 1)
+    d2, c2, n2, p2 = prepare_lead_sheet(raw2, 'Facebook Sheet 2', 2)
     all_rows = pd.concat([d1, d2], ignore_index=True)
     # Same phone + provided date + campaign in both sources is one lead, not two;
     # merge later followups instead of dropping a source's Short Codes.
@@ -191,6 +206,11 @@ def build_leads(raw1, raw2):
     leads = all_rows.drop_duplicates('lead_key', keep='first').copy()
     leads['source'] = leads['lead_key'].map(source_map)
     calls = pd.concat([c1, c2], ignore_index=True)
+    missing_results = pd.concat([p1, p2], ignore_index=True)
+    if not missing_results.empty:
+        # Same lead/call/date across sources should not create duplicate warnings.
+        missing_results = missing_results.drop_duplicates(['lead_key','call_no','call_date'],keep='first').copy()
+        missing_results['source'] = missing_results['lead_key'].map(source_map)
     if not calls.empty:
         calls = calls.drop_duplicates(['lead_key','call_no','short_code','call_date'], keep='first').copy()
         calls['source'] = calls['lead_key'].map(source_map)
@@ -199,14 +219,21 @@ def build_leads(raw1, raw2):
         calls.sort_values(['lead_key','call_no','call_date'], kind='stable', inplace=True)
         calls['conversion_event'] = calls.confirmed & ~calls.loc[calls.confirmed, 'lead_key'].duplicated().reindex(calls.index, fill_value=False)
         calls.reset_index(drop=True, inplace=True)
+        if not missing_results.empty:
+            # If a duplicate sheet has the corresponding actual Short Code, it is recorded.
+            actual = calls[['lead_key','call_no','call_date']].drop_duplicates().assign(_recorded=True)
+            missing_results = missing_results.merge(
+                actual, on=['lead_key','call_no','call_date'],how='left')
+            missing_results = missing_results.loc[missing_results['_recorded'].isna()].drop(columns=['_recorded'])
     else:
         calls['status'] = pd.Series(dtype='object')
         calls['confirmed'] = pd.Series(dtype='bool')
         calls['conversion_event'] = pd.Series(dtype='bool')
     leads['person_key'] = leads['phone'].where(leads.phone.ne(''), leads['lead_key'])
     notes = [n1, n2]
-    notes.append({'deduped_leads': int(len(all_rows)-len(leads)), 'total_leads':len(leads), 'total_calls':len(calls)})
-    return leads, calls, notes
+    notes.append({'deduped_leads': int(len(all_rows)-len(leads)), 'total_leads':len(leads),
+                  'total_calls':len(calls), 'date_only_no_code':len(missing_results)})
+    return leads, calls, notes, missing_results.reset_index(drop=True)
 
 
 def prepare_orders(raw):
@@ -474,7 +501,7 @@ def main():
         raw1=get_csv(FACEBOOK_LEADS_1)
         raw2=get_csv(FACEBOOK_LEADS_2)
         raw_orders=get_csv(TELE_SALES_ORDERS,'orders')
-        leads,calls,notes=build_leads(raw1,raw2)
+        leads,calls,notes,missing_results=build_leads(raw1,raw2)
         orders,order_notes=prepare_orders(raw_orders)
         orders=attach_orders_to_leads(leads,orders)
         cohort=make_cohort(leads,calls,orders)
@@ -518,6 +545,8 @@ def main():
     chosen_ids=set(chosen.lead_key)
     cohort_calls=calls.loc[calls.lead_key.isin(chosen_ids)]
     day_calls=date_filter(filtered_calls,'call_date',start,end)
+    filtered_missing=missing_results.loc[missing_results.lead_key.isin(visible_lead_ids)]
+    day_missing=date_filter(filtered_missing,'call_date',start,end)
     order_dates=date_filter(orders,'order_date',start,end)
 
     st.caption(f'Lead Sheet 1: {notes[0]["rows"]:,} rows · Lead Sheet 2: {notes[1]["rows"]:,} rows · '
@@ -531,7 +560,7 @@ def main():
         m=cohort_metrics(chosen)
         metrics_grid(st,m,[
             ('Leads','Leads',lambda x:f'{x:,}','একই ফোন + দিন + Campaign duplicate হলে এক Lead'),
-            ('Called Leads','Called',lambda x:f'{x:,}','কোনো Short Code বা Call Date আছে'),
+            ('Called Leads','Called',lambda x:f'{x:,}','At least one nonempty recorded Short Code'),
             ('Received Leads','Received',lambda x:f'{x:,}','কমপক্ষে একবার Received'),
             ('Confirmed Buyers','Conversions',lambda x:f'{x:,}','১ম–১০ম যেকোনো Short Code = অর্ডার করেছেন'),
             ('Conversion Rate','Rate',percent,'Unique Buyers ÷ Unique Received Customers'),
@@ -571,22 +600,31 @@ def main():
 
     with t2:
         st.markdown('<div class="report-head">Call Date — Calling Performance</div>',unsafe_allow_html=True)
-        st.markdown('<div class="report-note">এখানে Date Range <b>Call Date</b>-এর ওপর কাজ করে। ১ম–১০ম সব কল গণনা হয়। একই Lead একাধিকবার “অর্ডার করেছেন” হলে প্রথম Confirmed কলেই Conversion গণনা করা হয়।</div>',unsafe_allow_html=True)
+        st.markdown('<div class="report-note">Call Date selects recorded Short Code outcomes from 1st to 10th follow-ups. Date-only entries with no Short Code are shown separately as <b>Result Not Entered</b>, not treated as completed calls. A confirmed conversion is counted only once per lead.</div>',unsafe_allow_html=True)
         c_total=len(day_calls)
         rc=int(day_calls.status.eq('Received').sum())
         nc=int(day_calls.status.eq('Not Received').sum())
         uc=int(day_calls.status.eq('Unknown').sum())
         buyers=day_calls.loc[day_calls.conversion_event,'phone'].where(day_calls.loc[day_calls.conversion_event,'phone'].ne(''),day_calls.loc[day_calls.conversion_event,'lead_key']).nunique()
         reached=day_calls.loc[day_calls.status.eq('Received'),'phone'].where(day_calls.loc[day_calls.status.eq('Received'),'phone'].ne(''),day_calls.loc[day_calls.status.eq('Received'),'lead_key']).nunique()
-        metrics_grid(st,{'Calls':c_total,'Received':rc,'NotReceived':nc,'Unknown':uc,'Confirmed':buyers,'Answer':100*rc/max(c_total,1),'Conversion':100*buyers/max(reached,1)},[
+        metrics_grid(st,{'Calls':c_total,'Received':rc,'NotReceived':nc,'Unknown':uc,
+                         'Unrecorded':len(day_missing),'Confirmed':buyers,
+                         'Answer':100*rc/max(c_total,1),'Conversion':100*buyers/max(reached,1)},[
             ('Call Attempts','Calls',lambda x:f'{x:,}','একটি Short Code/Call Date = একটি call'),
             ('Received Calls','Received',lambda x:f'{x:,}','Short Code classified Received'),
-            ('Not Received Leads','NotReceived',lambda x:f'{x:,}','স্পষ্ট Not Received short codes'),
+            ('Not Received Calls','NotReceived',lambda x:f'{x:,}','Only recorded Not Received short codes'),
             ('Confirmed Buyers','Confirmed',lambda x:f'{x:,}','প্রথম অর্ডার করেছেন Call Date-এর দিন'),
             ('Conversion Rate','Conversion',percent,'Unique Confirmed Customers ÷ Unique Reached Customers'),
-            ('Unknown Codes','Unknown',lambda x:f'{x:,}','Blank/unclear Short Code'),
-            ('Answer Rate','Answer',percent,'Received Call Attempts ÷ All Call Attempts'),
+            ('Result Not Entered','Unrecorded',lambda x:f'{x:,}','Call Date is present, but its Short Code is empty; excluded from attempts'),
+            ('Unknown Codes','Unknown',lambda x:f'{x:,}','A nonempty but unclassified Short Code'),
+            ('Answer Rate','Answer',percent,'Received recorded calls / recorded call attempts'),
         ])
+        if len(day_missing):
+            st.caption(f'{len(day_missing):,} date-only entries have no Short Code in this date range. '
+                       'They are NOT counted as received, missed, or attempted calls.')
+        with st.expander('Audit: Call Date filled, Short Code blank',expanded=False):
+            audit=day_missing.groupby(['call_date','source','call_no'],dropna=False).size().reset_index(name='No Result Entries')
+            display_table(st,audit,'date_only_no_result_audit.csv')
         st.markdown('#### Day-wise Call Report')
         daycall=call_group(day_calls,'call_date').sort_values('call_date')
         display_table(st,daycall,'call_date_daily.csv')
@@ -653,7 +691,8 @@ def main():
                   'Calls without Call Date (cohort can still count their Short Codes)':badcall,
                   'Facebook orders with invalid Order Date':order_notes['invalid_fb_dates'],
                   'Exact duplicate invoice/amount rows removed':order_notes['duplicate_orders_removed'],
-                  'Facebook order rows (all dates)':len(orders)})
+                  'Facebook order rows (all dates)':len(orders),
+                  'Date filled but Short Code blank (all dates)':len(missing_results)})
         st.markdown('**Reconciliation:** Confirmed Buyers are Short Code based. Lead-matched sales use the first qualifying Provided-Date lead for the same phone and no maximum days. Orders lacking a matching phone stay in the Order Date tab; blank Campaign Name is always retained. Contact Rate and Answer Rate are different metrics.')
         st.markdown('**Not Received classification** is based on explicit known labels. Review unknown or new Short Codes when they appear.')
 
