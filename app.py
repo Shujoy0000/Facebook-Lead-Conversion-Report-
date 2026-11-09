@@ -1,307 +1,118 @@
-
-এই চ্যাটে আমি টেলি সেলস ড্যাশবোর্ড বানিয়েছি না? তো সেখানেকি এতো কিছু করেছিলাম?
-হ্যাঁ ভাই, এই চ্যাটেই আমরা Tele Sales Analytics Dashboard বানিয়েছি। আর সেখানে এত কিছু করতে হয়নি। আপনি ঠিকই বলেছেন।
-
-আগের Tele Sales Dashboard-এ আমরা যা করেছিলাম:
-
-Google Sheet-এর Published CSV URL সরাসরি app.py-তে দিয়েছিলাম।
-
-pd.read_csv(url) দিয়ে ডেটা আনতাম।
-
-Sidebar থেকে Date Select করতাম।
-
-Google Sheet-এ ডেটা আপডেট হলে Dashboard Refresh করলেই নতুন রিপোর্ট আসত।
-
-সেখানে Service Account, Google API, Streamlit Secrets কিংবা প্রতিবার Excel Upload—কোনোটাই লাগেনি।
-
-তাহলে নতুন Facebook Lead Conversion Report-এ এত কিছু কেন?
-আমি আগের সহজ পদ্ধতি অনুসরণ না করে অপ্রয়োজনীয়ভাবে জটিল করেছি।
-
-নতুন Dashboard-ও আগের মতো করতে চাই:
-
-Facebook Sheet → Published CSV → Streamlit
-
-Tele Sales Order Sheet → Published CSV → Streamlit
-
-দুই Sheet-এর ডেটা মিলিয়ে Campaign Conversion %, Received/Not Received, Short Code ও Order Amount হিসাব
-
-আগের Header ও Design অপরিবর্তিত
-
-শুধু একটা বিষয়: Facebook Sheet-এ গ্রাহকদের ফোন নম্বর ও ব্যক্তিগত তথ্য আছে। Published CSV করলে সেই ট্যাবের ডেটা লিংকধারীদের কাছে উন্মুক্ত হতে পারে। তাই এটি প্রকাশ করার আগে গোপনীয়তার বিষয়টি বিবেচনা করতে হবে।
-
-আপনার Tele Sales Dashboard-এর মতো একই সহজ কাঠামোতেই Facebook Lead Conversion Report বানানো উচিত ছিল। অপ্রয়োজনীয় পরিবর্তন না করে এখন থেকে সেটাই অনুসরণ করব।
-
-https://docs.google.com/spreadsheets/d/e/2PACX-1vRhGpSv6YJ5uwMeTI3r06mc4ZmqcCZlrTCQGsjDlDq2o1Y7uYhT3snVgI1jZ_zMUzxN_RZfOKcC-Rfm/pub?output=csv
-
-
-https://docs.google.com/spreadsheets/d/e/2PACX-1vTDhr-rwKe88LKKludd74G766j1l4vbvoaHi1YwwkefcfjCCgDGkZL6Ty9ngNv3gVvd5ezElgXghOs3/pub?gid=81417&single=true&output=csv
-
-ঠিক আছে। আপনার দেওয়া দুটি Published Google Sheets CSV লিংক ব্যবহার করে Facebook Lead Conversion Report-এর Streamlit কোড আপডেট করেছি।
-
-এখন আগের Tele Sales Dashboard-এর মতোই pd.read_csv() দিয়ে Google Sheet থেকে সরাসরি ডেটা নেওয়ার ব্যবস্থা আছে। Service Account, Streamlit Secrets কিংবা প্রতিবার Excel আপলোড করার প্রয়োজন নেই।
-
-Facebook Lead Conversion Report — Updated
-
-GitHub-ready ZIP · 6 files
-
- সম্পূর্ণ Dashboard ডাউনলোড করুন
-
-Dashboard-এ যা থাকবে
-Data Provided Date Report: Daily leads, Contact Rate এবং Conversion Rate।
-
-Call Date Report: Received, Not Received এবং Short Code অনুযায়ী রিপোর্ট।
-
-Campaign Conversion Report: Campaign-wise Leads, Orders, Conversion % এবং Amount (৳)।
-
-Order Report: Product Price, Order Value এবং Campaign-wise Revenue।
-
-আগের হেডার: Bigganbaksho লোগো, কমলা টাইটেল ও বাংলা লেখা।
-
-GitHub-এ যা করবেন
-ZIP Extract করুন।
-
-আপনার GitHub Repository খুলুন।
-
-Add file → Upload files থেকে ছয়টি ফাইল আপলোড/replace করুন।
-
-Commit changes দিন।
-
-Streamlit App Refresh করুন।
-
-ডাউনলোডে সমস্যা হলে আলাদাভাবে app.py, analytics.py এবং requirements.txt নিতে পারবেন।
-
-যাচাই: কোডের syntax এবং sample Conversion Calculation পরীক্ষা করেছি। তবে এই পরিবেশ থেকে আপনার Published CSV দুটির live content ডাউনলোড করা যায়নি, তাই বাস্তব ডেটার সংখ্যা এখনো নিশ্চিত করা হয়নি। App চালু হলে CSV-এর সঠিক column পাওয়া যাচ্ছে কি না তা যাচাই করবে।
-
-একটি সতর্কতা: Published CSV-তে গ্রাহকের ফোন নম্বর থাকলে লিংকটি অন্য কেউ পেলেও সেই তথ্য পড়তে পারতে পারেন।
-
-
-app.py
-Code
-
-analytics.py
-Code
-
-requirements.txt
-Document
-User attachment
-User attachment
-এটা দেখো আর পরেরটা দেখো
-দুইটা Screenshot মিলিয়ে দেখলাম। প্রথমটা আগের Tele Sales Dashboard, দ্বিতীয়টা নতুন Facebook Lead Conversion Report। নতুনটার ডিজাইন ও Date Selection আগেরটার মতো হয়নি।
-
-বিশেষ করে তিনটি সমস্যা দেখা যাচ্ছে:
-
-Header নষ্ট হয়েছে: আগের Dashboard-এ লোগো, কমলা টাইটেল ও বাংলা লেখাগুলো সুন্দরভাবে দেখা যায়। নতুনটায় HTML code সরাসরি দেখা যাচ্ছে।
-
-Date Selection-এ সমস্যা: নতুনটায় 29 June 2027 – 29 July 2027 দেখাচ্ছে, অথচ এখন নভেম্বর ২০২৬।
-
-রিপোর্টে অস্বাভাবিক সংখ্যা: 9,533 Facebook records লোড হলেও নির্বাচিত সময়ে মাত্র ১টি lead দেখাচ্ছে। Date parsing ও filtering যাচাই করা প্রয়োজন।
-
-আমি আগের Dashboard-এর ডিজাইন ও Date Picker অনুসরণ করে নতুনটার সমস্যা সংশোধন করব। Campaign Conversion, Call Date, Short Code, Order Amount—এসব রিপোর্ট বাদ দেওয়া হবে না।
-
-আর Date-এর সমস্যার নির্দিষ্ট কারণও পেয়েছি।
-
-Google Sheet-এর Facebook ট্যাবের 8422 নম্বর সারিতে Date = 29-07-2027 আছে। এই একটি ভবিষ্যতের তারিখকেই নতুন Dashboard সর্বশেষ তারিখ ধরে নিয়েছে। তাই Default Date Range ২০২৭-এ চলে গেছে এবং মাত্র ১টি lead দেখাচ্ছে।
-
-এর সমাধানে আসল ডেটা পরিবর্তন না করে Dashboard-এর Default End Date আজকের তারিখ বা তার আগের সর্বশেষ ডেটার মধ্যে রাখব। ভবিষ্যতের তারিখগুলো আলাদাভাবে চিহ্নিত হবে।
-
-সংশোধিত Dashboard তৈরি করেছি
-Facebook Lead Conversion Report — Header & Date Fixed
-
-ZIP · GitHub-ready · সব রিপোর্ট ও হিসাব অক্ষত
-
- সংশোধিত Dashboard ডাউনলোড করুন
-
-শুধু প্রয়োজনীয় ফাইলটি চাইলে:
-
- Updated app.py
-
-GitHub-এ যা করবেন: আপনার Repository-তে গিয়ে শুধু app.py replace করে Commit changes দিন। তারপর Streamlit Dashboard Refresh করুন।
-
-এখন Header সঠিকভাবে render হওয়ার কথা এবং Date Picker আগের Tele Sales Dashboard-এর মতো আলাদা Start Date / End Date দেখাবে। Default Date আর ভবিষ্যতের ভুল এন্ট্রি ধরে নির্ধারিত হবে না।
-
-কোডের syntax এবং আগের রিপোর্টের calculation অংশ অপরিবর্তিত আছে কি না যাচাই করেছি। তবে নতুন Streamlit UI লাইভ চালিয়ে এখনো পরীক্ষা করা হয়নি।
-
-আর Google Sheet-এর 8422 নম্বর সারির 29-07-2027 তারিখটি ভুল এন্ট্রি হলে শিটে সংশোধন করাও ভালো।
-
-
-app.py
-Code
-User attachment
-সমস্যাটা নিশ্চিতভাবে পেয়েছি। আপনার GitHub Repository-র বর্তমান app.py-এর প্রথম লাইনই হলো:
-
-    with st.expander('Day × Campaign report',expanded=False):
-
-অর্থাৎ পুরো Python ফাইলের বদলে মাঝখানের একটি অংশ GitHub-এ আপলোড হয়েছে। তাই IndentationError আসছে।
-
-সমাধান: সম্পূর্ণ app.py দিয়ে বর্তমান ফাইলটি replace করতে হবে। শুধু প্রথম লাইনের স্পেস মুছে দিলে হবে না।
-
-আগের Header, Date Filter, Campaign Conversion, Call Report এবং Order Amount-এর কোডসহ সম্পূর্ণ ফাইলটি দিচ্ছি।
-
-সম্পূর্ণ সংশোধিত app.py
-
-514 lines · Python syntax verified
-
- Fixed app.py ডাউনলোড করুন
-
-GitHub-এ যেভাবে ঠিক করবেন
-আপনার GitHub Repository খুলুন।
-
-Add file → Upload files নির্বাচন করুন।
-
-ডাউনলোড করা সম্পূর্ণ app.py আপলোড করুন, যাতে পুরোনো app.py replace হয়।
-
-Commit changes দিন।
-
-Streamlit Dashboard খুলে Refresh করুন।
-
-ফাইলটি ঠিকভাবে আপলোড হয়েছে কি না যাচাই করতে GitHub-এর app.py খুলুন। প্রথম লাইন হবে:
-
-import io
-
-পুরো ছয়টি ফাইল একসঙ্গে প্রয়োজন হলে Complete Fixed ZIP নিতে পারবেন।
-
-যাচাই করেছি: সম্পূর্ণ app.py এবং analytics.py Python syntax check পাস করেছে। তবে Streamlit Cloud-এ নতুন deployment চলা এখনো যাচাই করা হয়নি।
-
-
-app.py
-Code
-User attachment
-সমস্যাটা পেয়েছি। আপনার GitHub-এ এখনো পুরোনো, অসম্পূর্ণ app.py আছে। তাই একই IndentationError বারবার দেখাচ্ছে।
-
-আমি সম্পূর্ণ ফাইলটি আবার পরীক্ষা করেছি—৫১৪ লাইন, Python syntax check পাস করেছে।
-
-সম্পূর্ণ সংশোধিত app.py
-
-Python · 514 lines · 34 KB
-
- সঠিক app.py ডাউনলোড করুন
-
-এবার GitHub-এ ঠিক এইভাবে করবেন
-GitHub-এর বর্তমান app.py খুলুন।
-
-উপরের তিন ডট (...) → Delete file দিয়ে পুরোনো app.py মুছে Commit changes দিন।
-
-Repository-তে ফিরে Add file → Upload files চাপুন।
-
-উপরের লিংক থেকে ডাউনলোড করা নতুন app.py আপলোড করুন।
-
-আবার Commit changes দিন।
-
-কীভাবে বুঝবেন এবার ঠিক হয়েছে?
-GitHub-এ নতুন app.py খুলে দেখবেন প্রথম তিন লাইন:
-
-import io
-import base64
-import os
-
-প্রথম লাইনে আর with st.expander(...) থাকবে না।
-
-তারপর Facebook Lead Conversion Report খুলে Refresh করুন।
-
-শুধু app.py পরিবর্তন করবেন। analytics.py, requirements.txt, logo.png অপরিবর্তিত থাকবে। এতে আগের রিপোর্ট ও ডিজাইন নষ্ট হবে না।
-
-আমি GitHub-এর বর্তমান ভুল ফাইলটি শনাক্ত করেছি, তবে Repository-তে সরাসরি পরিবর্তন করার অনুমতি না থাকায় Commit আপনাকেই করতে হবে।
-
-
-app.py
-Code
-"""Facebook Lead Conversion Report | Bigganbaksho
-
-Three Google Sheets published CSV sources. No uploaded customer files and no Google API credentials.
-Data Provided is a lead COHORT report; date selection never cuts off later calls/orders.
-Call Date and Order Date are independent activity-date reports.
-"""
-from __future__ import annotations
-
-import base64
-import datetime as dt
-import re
-from pathlib import Path
-
-import pandas as pd
-
-
-FACEBOOK_LEADS_1 = (
-    'https://docs.google.com/spreadsheets/d/e/'
-    '2PACX-1vRhGpSv6YJ5uwMeTI3r06mc4ZmqcCZlrTCQGsjDlDq2o1Y7uYhT3snVgI1jZ_zMUzxN_RZfOKcC-Rfm/'
-    'pub?gid=1218239306&single=true&output=csv'
-)
-FACEBOOK_LEADS_2 = (
-    'https://docs.google.com/spreadsheets/d/e/'
-    '2PACX-1vSWfDJ5fR_NxnfT_1E5sfxh1BCuXIgHA_mwZ53P6Gw5oN6tHouRCx1GOxA7WDuWkmSrmz136pqXZmyv/'
-    'pub?gid=1811215808&single=true&output=csv'
-)
-TELE_SALES_ORDERS = (
-    'https://docs.google.com/spreadsheets/d/e/'
-    '2PACX-1vTDhr-rwKe88LKKludd74G766j1l4vbvoaHi1YwwkefcfjCCgDGkZL6Ty9ngNv3gVvd5ezElgXghOs3/'
-    'pub?gid=81417&single=true&output=csv'
-)
-BN_DIGITS = str.maketrans('০১২৩৪৫৬৭৮৯', '0123456789')
-NOT_RECEIVED_CODES = {
-    'কল ধরেনি', 'কল ধরেন নাই', 'কল রিসিভ করেনি', 'ফোন ধরেনি', 'ফোন রিসিভ করেনি',
-    'ফোন বন্ধ', 'মোবাইল বন্ধ', 'নম্বর বন্ধ', 'নাম্বার বন্ধ', 'কল যাচ্ছে না',
-    'ফোন যাচ্ছে না', 'নাম্বার বিজি', 'নম্বর বিজি', 'ফোন বিজি', 'কল ওয়েটিং',
-    'রিং বাজার পর কল কেটে দিয়েছে', 'রিং বাযার পর কল কেটে দিয়েছে',
-    'ডিজিট কম', 'ডিজিট বেশি', 'নাম্বার নেই', 'নাম্বার ভুল', 'নম্বর ভুল',
-    'রং নাম্বার', 'বিদেশি নাম্বার', 'wrong number', 'not received', 'no answer',
-    'not answered', 'busy', 'switched off', 'unreachable', 'not reachable',
-}
-UNKNOWN_CODES = {'', '-', 'n/a', 'nan', 'none', 'unknown', 'other', 'others', 'আদার্স', 'অন্যান্য'}
-CONFIRMED_CODES = {'অর্ডার করেছেন', 'order confirmed', 'order placed', 'ordered'}
-
-
-def norm_header(x):
-    return re.sub(r'[^a-z0-9]+', '', str(x).strip().lower())
-
-
-def find_col(frame, alternatives, required=False):
-    lookup = {norm_header(c): c for c in frame.columns}
-    for candidate in alternatives:
-        col = lookup.get(norm_header(candidate))
-        if col is not None:
-            return col
-    if required:
-        raise ValueError(f"Expected one of {alternatives}; actual CSV columns begin: {list(frame.columns[:16])}")
-    return None
-
-
-def string_series(frame, col):
-    if col is None:
-        return pd.Series('', index=frame.index, dtype='object')
-    return frame[col].fillna('').astype(str).str.strip()
-
-
-def parse_date(values):
-    """Day-first Google CSV dates; keeps invalid rows as NaT (never silently swaps month/day)."""
-    s = pd.Series(values, copy=False).fillna('').astype(str).str.translate(BN_DIGITS).str.strip()
-    try:
-        dates = pd.to_datetime(s, dayfirst=True, errors='coerce', format='mixed')
-    except (ValueError, TypeError):
-        dates = pd.to_datetime(s, dayfirst=True, errors='coerce')
-    serial = pd.to_numeric(s, errors='coerce')
-    serial_mask = dates.isna() & serial.between(40000, 65000)
-    if serial_mask.any():
-        dates.loc[serial_mask] = pd.to_datetime(serial.loc[serial_mask], unit='D', origin='1899-12-30', errors='coerce')
-    return dates.dt.normalize().where(dates.dt.year.between(2020, 2036))
-
-
-def phone_key(value):
-    s = str(value or '').translate(BN_DIGITS).strip()
-    if re.fullmatch(r'\d+\.0+', s):
-        s = s.split('.')[0]
-    s = re.sub(r'\D', '', s)
-    return s[-10:] if len(s) >= 10 else ''
-
-
-def as_amount(series):
-    cleaned = (pd.Series(series, copy=False).fillna('').astype(str).str.translate(BN_DIGITS)
-               .str.replace(r'[^0-9.\-]', '', regex=True))
-    return pd.to_numeric(cleaned, errors='coerce').fillna(0).clip(lower=0)
-
-
-def is_converted(code):
-    x = re.sub(r'\s+', ' ', str(code or '').strip()).casefold()
-
-
-
-
+        day=cohort_group(chosen,'provided_date').sort_values('provided_date')
+        if not day.empty:
+            fig=px.line(day,x='provided_date',y=['Leads','Received','Confirmed Buyers','Order Count'],markers=True,
+                        color_discrete_sequence=['#ff6600','#2e9c75','#5d65be','#f1ab29'])
+            fig.update_layout(height=330,legend_orientation='h',margin=dict(l=10,r=10,t=15,b=15),
+                              xaxis_title='',yaxis_title='')
+            st.plotly_chart(fig,use_container_width=True)
+        display_table(st,day,'data_provided_day.csv')
+        st.markdown('#### Source-wise (Two Facebook Lead Sheets)')
+        display_table(st,cohort_group(chosen,'source').sort_values('Leads',ascending=False),'data_provided_sources.csv')
+        st.markdown('#### Campaign / Lead Source-wise')
+        ca=cohort_group(chosen,'campaign').sort_values('Leads',ascending=False)
+        columns=st.columns([1.15,1])
+        with columns[0]:bar_chart(st,ca,'campaign','Leads','Campaign অনুযায়ী Lead সংখ্যা')
+        with columns[1]:bar_chart(st,ca,'campaign','Confirmed Buyers','Campaign অনুযায়ী Confirmed Buyers')
+        display_table(st,ca,'data_provided_campaigns.csv')
+        with st.expander('Day × Campaign — Detailed',expanded=False):
+            display_table(st,cohort_group(chosen,['provided_date','campaign']),'data_provided_day_campaign.csv')
+        with st.expander('Agent Performance',expanded=False):
+            display_table(st,cohort_group(chosen,'agent'),'data_provided_agents.csv')
+        with st.expander('Short Code Breakdown (including later calls)',expanded=False):
+            codes=cohort_calls.groupby(['short_code','status'],dropna=False).agg(
+                Calls=('lead_key','size'), **{'Confirmed Events':('confirmed','sum')}).reset_index()
+            if not codes.empty:
+                codes['%'] = codes.Calls/max(len(cohort_calls),1)*100
+            display_table(st,codes.sort_values('Calls',ascending=False),'data_provided_short_codes.csv')
+
+    with t2:
+        st.markdown('<div class="report-head">Call Date — Calling Performance</div>',unsafe_allow_html=True)
+        st.markdown('<div class="report-note">এখানে Date Range <b>Call Date</b>-এর ওপর কাজ করে। ১ম–১০ম সব কল গণনা হয়। একই Lead একাধিকবার “অর্ডার করেছেন” হলে প্রথম Confirmed কলেই Conversion গণনা করা হয়।</div>',unsafe_allow_html=True)
+        c_total=len(day_calls)
+        rc=int(day_calls.status.eq('Received').sum())
+        nc=int(day_calls.status.eq('Not Received').sum())
+        uc=int(day_calls.status.eq('Unknown').sum())
+        buyers=day_calls.loc[day_calls.conversion_event,'phone'].where(day_calls.loc[day_calls.conversion_event,'phone'].ne(''),day_calls.loc[day_calls.conversion_event,'lead_key']).nunique()
+        reached=day_calls.loc[day_calls.status.eq('Received'),'phone'].where(day_calls.loc[day_calls.status.eq('Received'),'phone'].ne(''),day_calls.loc[day_calls.status.eq('Received'),'lead_key']).nunique()
+        metrics_grid(st,{'Calls':c_total,'Received':rc,'NotReceived':nc,'Unknown':uc,'Confirmed':buyers,'Answer':100*rc/max(c_total,1),'Conversion':100*buyers/max(reached,1)},[
+            ('Call Attempts','Calls',lambda x:f'{x:,}','একটি Short Code/Call Date = একটি call'),
+            ('Received Calls','Received',lambda x:f'{x:,}','Short Code classified Received'),
+            ('Not Received Leads','NotReceived',lambda x:f'{x:,}','স্পষ্ট Not Received short codes'),
+            ('Confirmed Buyers','Confirmed',lambda x:f'{x:,}','প্রথম অর্ডার করেছেন Call Date-এর দিন'),
+            ('Conversion Rate','Conversion',percent,'Unique Confirmed Customers ÷ Unique Reached Customers'),
+            ('Unknown Codes','Unknown',lambda x:f'{x:,}','Blank/unclear Short Code'),
+            ('Answer Rate','Answer',percent,'Received Call Attempts ÷ All Call Attempts'),
+        ])
+        st.markdown('#### Day-wise Call Report')
+        daycall=call_group(day_calls,'call_date').sort_values('call_date')
+        display_table(st,daycall,'call_date_daily.csv')
+        st.markdown('#### 1st–10th Call Performance')
+        callno=call_group(day_calls,'call_no').sort_values('call_no')
+        display_table(st,callno,'call_number_report.csv')
+        st.markdown('#### Short Code Report & Percentage')
+        bycode=call_group(day_calls,['short_code','status']).sort_values('Call Attempts',ascending=False)
+        if not bycode.empty:
+            bycode['Call Share %']=100*bycode['Call Attempts']/max(c_total,1)
+        display_table(st,bycode,'short_code_report.csv')
+        with st.expander('Source / Campaign / Agent breakdown',expanded=False):
+            st.markdown('**Lead Sheet-wise Calls**')
+            display_table(st,call_group(day_calls,'source'),'call_source.csv')
+            st.markdown('**Campaign-wise Calls**')
+            display_table(st,call_group(day_calls,'campaign'),'call_campaign.csv')
+            st.markdown('**Agent-wise Calls**')
+            display_table(st,call_group(day_calls,'agent'),'call_agent.csv')
+        with st.expander('Call Date × Campaign',expanded=False):
+            display_table(st,call_group(day_calls,['call_date','campaign']),'call_date_campaign.csv')
+
+    with t3:
+        st.markdown('<div class="report-head">Campaign Conversion & Revenue</div>',unsafe_allow_html=True)
+        st.caption('Lead Campaign-এর Conversion = Facebook Short Code; Order Value = ফোন নম্বর দিয়ে attribution করা Facebook Lead Orders। Order Sheet-এর Campaign Name ফাঁকা থাকলে আলাদা Blank group-এ টাকা দেখানো হয়।')
+        cmp=cohort_group(chosen,'campaign').sort_values('Order Value',ascending=False)
+        display_table(st,cmp,'lead_campaign_conversion_and_amount.csv')
+        bar_chart(st,cmp,'campaign','Order Value','Phone-matched Order Value by Lead Campaign')
+        st.markdown('#### Order Sheet Campaign Name — All Facebook Orders')
+        st.caption('এটি Order Sheet-এর Campaign Name field, Lead Campaign attribution নয়। খালি Campaign Name-ও Order Value-সহ গণনা হয়। এখানে Date Filter Order Date-এর ওপর কাজ করে।')
+        s=order_dates.copy()
+        s['order_campaign_display']=s.order_campaign_name.replace('', '(Blank Campaign Name)')
+        byorder=order_group(s,'order_campaign_display').sort_values('Order Value',ascending=False)
+        display_table(st,byorder.rename(columns={'order_campaign_display':'Campaign Name'}),'order_campaign_names.csv')
+        unmatch=orders.loc[orders.lead_key.isna()]
+        st.caption(f'Full Facebook Order file: {len(orders):,} orders · {money(orders.amount.sum())} | '
+                   f'Lead-unmatched: {len(unmatch):,} orders · {money(unmatch.amount.sum())}. '
+                   'Unmatched orders remain in the Order Date/Campaign Name reports, not silently discarded.')
+
+    with t4:
+        st.markdown('<div class="report-head">Order Date — Facebook Sales</div>',unsafe_allow_html=True)
+        st.caption('এখানে Date Range কেবল Tele Sales Order-এর Order Date বেছে নেয়। Campaign category Facebook হলে Order Value গণনা হবে, Campaign Name ফাঁকা হলেও।')
+        metrics_grid(st,{'orders':len(order_dates),'amount':float(order_dates.amount.sum()),
+                        'qty':float(order_dates.qty.sum()),'aov':float(order_dates.amount.mean()) if len(order_dates) else 0},[
+            ('Facebook Orders','orders',lambda x:f'{x:,}','Order Date অনুযায়ী'),
+            ('Order Value','amount',money,'শেষের Product Price'),
+            ('Product Qty','qty',lambda x:f'{x:,.0f}','Total Qty'),
+            ('AOV','aov',money,'Amount ÷ Orders'),
+        ])
+        st.markdown('#### Day-wise Orders')
+        display_table(st,order_group(order_dates,'order_date').sort_values('order_date'),'order_date_daily.csv')
+        st.markdown('#### Campaign Name-wise Order Amount')
+        oc=order_dates.copy()
+        oc['order_campaign_display']=oc.order_campaign_name.replace('', '(Blank Campaign Name)')
+        oc_stats=order_group(oc,'order_campaign_display').sort_values('Order Value',ascending=False)
+        display_table(st,oc_stats.rename(columns={'order_campaign_display':'Campaign Name'}),'order_date_campaign.csv')
+        bar_chart(st,oc_stats,'order_campaign_display','Order Value','Order Sheet Campaign Name')
+
+    with st.expander('Data Quality / Calculation Notes',expanded=False):
+        badlead=sum(x['missing_dates'] for x in notes[:2])
+        badcall=int(calls.call_date.isna().sum())
+        duplicates=notes[2]['deduped_leads']
+        st.write({'Facebook Sheet 1 rows':notes[0]['rows'],'Facebook Sheet 2 rows':notes[1]['rows'],
+                  'Duplicate leads merged':duplicates,'Lead rows without Provided Date':badlead,
+                  'Calls without Call Date (cohort can still count their Short Codes)':badcall,
+                  'Facebook orders with invalid Order Date':order_notes['invalid_fb_dates'],
+                  'Exact duplicate invoice/amount rows removed':order_notes['duplicate_orders_removed'],
+                  'Facebook order rows (all dates)':len(orders)})
+        st.markdown('**Reconciliation:** Confirmed Buyers are Short Code based. Lead-matched sales use the first qualifying Provided-Date lead for the same phone and no maximum days. Orders lacking a matching phone stay in the Order Date tab; blank Campaign Name is always retained. Contact Rate and Answer Rate are different metrics.')
+        st.markdown('**Not Received classification** is based on explicit known labels. Review unknown or new Short Codes when they appear.')
+
+
+if __name__ == '__main__':
+    main()
